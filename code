@@ -1,0 +1,84 @@
+python
+import cv2
+import numpy as np
+import pyautogui
+import pytesseract
+import asyncio
+from obsws_python import obsws, requests
+
+# Set screen size and video recording parameters
+SCREEN_SIZE = (1920, 1080)
+fourcc = cv2.VideoWriter_fourcc(*"XVID")
+out = cv2.VideoWriter("output.avi", fourcc, 10.0, SCREEN_SIZE)
+
+# OBS connection parameters
+OBS_HOST = 'localhost'
+OBS_PORT = 4455
+OBS_PASSWORD = 'your_password'  # Replace with your OBS WebSocket password
+
+# Function to connect to OBS and control recording
+async def start_stop_obs_recording(action):
+    ws = obsws(OBS_HOST, OBS_PORT, OBS_PASSWORD)
+    await ws.connect()
+
+    if action == "start":
+        await ws.call(requests.StartRecord())
+    elif action == "stop":
+        await ws.call(requests.StopRecord())
+
+    await ws.disconnect()
+
+# Function to record screen and blur the word "google"
+def record_screen():
+    while True:
+        img = pyautogui.screenshot()
+        frame = np.array(img)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Convert to grayscale for text recognition
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
+        # Use Tesseract to recognize text
+        text = pytesseract.image_to_string(frame)
+
+        # Create a copy of the frame for applying blur
+        blurred_frame = frame.copy()
+
+        # Split the recognized text into words
+        words = text.split()
+
+        # Iterate through words and their bounding boxes
+        for word, word_bbox in zip(words, pytesseract.image_to_boxes(frame)):
+            if 'google' in word.lower():
+                # Extract coordinates for the word "google"
+                x1, y1, x2, y2 = word_bbox[1], word_bbox[2], word_bbox[3], word_bbox[4]
+                # Apply blur only to the area with the word
+                roi = blurred_frame[y1:y2, x1:x2]
+                blurred_roi = cv2.GaussianBlur(roi, (35, 35), 0)  # Blur intensity is set to 35
+                blurred_frame[y1:y2, x1:x2] = blurred_roi
+
+        # Save the video
+        out.write(blurred_frame)
+        cv2.imshow("screenshot", blurred_frame)
+
+        # Stop recording if 'q' is pressed
+        if cv2.waitKey(1) == ord("q"):
+            break
+
+    # Close OpenCV windows and finish video recording
+    cv2.destroyAllWindows()
+    out.release()
+
+# Asynchronous function for controlling OBS recording
+async def main():
+    # Start OBS recording
+    await start_stop_obs_recording("start")
+
+    # Start screen recording with blur
+    record_screen()
+
+    # Stop OBS recording after screen recording is done
+    await start_stop_obs_recording("stop")
+
+# Run the main program
+asyncio.run(main())
